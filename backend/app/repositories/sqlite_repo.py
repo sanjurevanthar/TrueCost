@@ -58,9 +58,10 @@ class SqlitePriceRepository(PriceRepository):
     def get_codes(self, codes: Sequence[str]) -> List[MedicalCode]:
         if not codes:
             return []
+        # Safe: _marks() yields only "?" placeholders; every value is bound as a parameter.
         with closing(self._connect()) as con:
-            rows = con.execute(  # nosec B608 - only "?" placeholders are interpolated; values are bound
-                f"SELECT code, code_type, description, phase FROM codes WHERE code IN ({self._marks(codes)})",
+            rows = con.execute(
+                f"SELECT code, code_type, description, phase FROM codes WHERE code IN ({self._marks(codes)})",  # nosec B608
                 list(codes)).fetchall()
         return [MedicalCode(r["code"], r["code_type"], r["description"], r["phase"]) for r in rows]
 
@@ -68,7 +69,8 @@ class SqlitePriceRepository(PriceRepository):
         if not codes:
             return []
         t0 = time.perf_counter()
-        sql = f"SELECT * FROM prices WHERE code IN ({self._marks(codes)})"  # nosec B608 - "?" placeholders only
+        # Safe: _marks() yields only "?" placeholders; every value is bound as a parameter.
+        sql = f"SELECT * FROM prices WHERE code IN ({self._marks(codes)})"  # nosec B608
         args: list = list(codes)
         if payer:
             sql += " AND (payer = ? OR payer IS NULL)"
