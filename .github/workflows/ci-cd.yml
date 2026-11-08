@@ -1,0 +1,204 @@
+name: CI/CD
+
+# Every push to any branch: test, scan, build + smoke-test the Docker image. No secrets needed for this part.
+# Pushes to main only: also publish the image to GitHub Container Registry.
+# Deploying to Vultr runs only after you set the repository variable DEPLOY_ENABLED=true (README -> CI/CD).
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------ 1. tests + security scans
+  test:
+    name: Tests and security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install (locked versions, test dependencies only)
+        run: uv sync --frozen --python 3.12 --no-default-groups --group dev
+
+      - name: Unit + API tests
+        # integration tests skip themselves here: truecost.db is not in git
+        run: uv run --no-sync pytest
+
+      - name: Static security scan (bandit)
+        run: uvx bandit -r backend/app -ll -q
+
+      - name: Known-vulnerability scan of dependencies (pip-audit)
+        continue-on-error: true      # a newly published advisory should warn, not block an unrelated push
+        run: |
+          uv export --frozen --no-hashes --no-default-groups --no-emit-project > requirements.audit.txt
+          uvx pip-audit -r requirements.audit.txt --no-deps --disable-pip
+
+      - name: Workflow + deploy-script lint
+        run: |
+          bash -n deploy/deploy.sh
+          uvx --from actionlint-py actionlint
+
+  # ------------------------------------------------------------------ 2. build the image and prove it starts
+  image:
+    name: Build and smoke-test the Docker image
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out image name and tag
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=ghcr.io/${owner}/truecost-api" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (not pushed yet)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: truecost-api:ci
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the container exactly as production runs it
+        run: |
+          # a tiny stand-in price database (the real one is not in git)
+          sqlite3 ci.db "
+            CREATE TABLE hospitals(hospital TEXT PRIMARY KEY, address TEXT, lat REAL, lng REAL);
+            CREATE TABLE codes(code TEXT, code_type TEXT, description TEXT, phase TEXT);
+            CREATE TABLE prices(hospital TEXT, code TEXT, code_type TEXT, description TEXT, setting TEXT, payer TEXT,
+              plan TEXT, rate_type TEXT, negotiated_rate REAL, cash_price REAL, gross_charge REAL, notes TEXT);
+            INSERT INTO hospitals VALUES ('CI Hospital', '1 Test St', 42.9, -78.8);
+            INSERT INTO codes VALUES ('77066', 'CPT', 'Diagnostic mammography, bilateral', 'diagnostic');
+            INSERT INTO prices VALUES ('CI Hospital','77066','CPT','mammo','outpatient',NULL,NULL,NULL,NULL,150,400,NULL);"
+          chmod 644 ci.db
+          docker run -d --name tc -p 8000:8000 --read-only --tmpfs /tmp \
+            -v "$PWD/ci.db:/app/truecost.db:ro" -e EXTRACTOR=keyword -e REQUIRE_SESSION=false truecost-api:ci
+          ok=""
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/ready >/dev/null 2>&1; then ok=yes; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then echo "container never became ready"; docker logs tc; exit 1; fi
+          curl -fsS http://127.0.0.1:8000/ready
+          curl -fsS http://127.0.0.1:8000/api/v1/hospitals | grep -q "CI Hospital"
+          curl -fsS -X POST http://127.0.0.1:8000/api/v1/estimate -H 'Content-Type: application/json' \
+            -d '{"codes":["77066"],"mode":"self_pay"}' | grep -q '"best_hospital":"CI Hospital"'
+          test "$(docker exec tc id -u)" = "10001"                      # not running as root
+          docker logs tc 2>&1 | grep -m1 '^{' | python3 -c 'import json,sys; json.loads(sys.stdin.readline())'   # JSON logs
+          docker run --rm --entrypoint sh truecost-api:ci -c 'test ! -e /app/.env && test ! -e /app/truecost.db'  # no secrets/data baked in
+          echo "smoke test passed"
+
+      - name: Show logs if the smoke test failed
+        if: failure()
+        run: docker logs tc || true
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.image }}:latest
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+
+  # ------------------------------------------------------------------ 3. deploy to Vultr (main only)
+  deploy:
+    name: Deploy to Vultr
+    needs: image
+    # skipped (grey, not red) until the repository variable DEPLOY_ENABLED is set to "true"
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production          # optional: add "required reviewers" in GitHub for a manual approval step
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false      # never interrupt a deploy that is half done
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the deployment secrets exist
+        env:
+          HOST: ${{ secrets.VULTR_HOST }}
+          USER_: ${{ secrets.VULTR_USER }}
+          KEY: ${{ secrets.VULTR_SSH_KEY }}
+          KNOWN: ${{ secrets.VULTR_KNOWN_HOSTS }}
+        run: |
+          for v in HOST USER_ KEY KNOWN; do
+            if [ -z "${!v}" ]; then echo "::error::GitHub secret for $v is missing (see README: CI/CD setup)"; exit 1; fi
+          done
+
+      - name: Prepare SSH
+        env:
+          KEY: ${{ secrets.VULTR_SSH_KEY }}
+          KNOWN: ${{ secrets.VULTR_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+
+      - name: Copy deployment files to the server
+        env:
+          TARGET: ${{ secrets.VULTR_USER }}@${{ secrets.VULTR_HOST }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes"
+          $SSH "$TARGET" 'mkdir -p ~/truecost'
+          scp -i "$HOME/.ssh/deploy_key" -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            docker-compose.yml Caddyfile deploy/deploy.sh "$TARGET":truecost/
+
+      - name: Deploy (pull the new image, wait until healthy, roll back if not)
+        env:
+          TARGET: ${{ secrets.VULTR_USER }}@${{ secrets.VULTR_HOST }}
+          TAG: ${{ needs.image.outputs.tag }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes"
+          # short-lived token goes over stdin: it is never written to the server's disk beyond docker's own login file,
+          # which we remove again at the end
+          printf '%s' "$REGISTRY_TOKEN" | $SSH "$TARGET" "docker login ghcr.io -u '$REGISTRY_USER' --password-stdin"
+          $SSH "$TARGET" "cd ~/truecost && chmod +x deploy.sh && IMAGE='$IMAGE' ./deploy.sh '$TAG'" || status=$?
+          $SSH "$TARGET" "docker logout ghcr.io" || true
+          exit "${status:-0}"
+
+      - name: Check the live site
+        env:
+          DOMAIN: ${{ secrets.VULTR_DOMAIN }}
+        run: |
+          if [ -z "$DOMAIN" ]; then echo "VULTR_DOMAIN secret not set: skipping public check"; exit 0; fi
+          curl -fsS --retry 5 --retry-delay 5 "https://$DOMAIN/ready"

@@ -2,14 +2,14 @@
 #   First time:   create .env (variables listed in README -> Deploy on Vultr), then   docker compose up -d --build
 #   Logs:         docker compose logs -f api          (JSON lines; grep a request:  ... | grep <request_id>)
 #   Status:       docker compose ps                    (api shows "healthy" once /health answers)
-#   Update:       git pull && docker compose up -d --build
+#   Update:       automatic on push to main (GitHub Actions -> deploy/deploy.sh). By hand: ./deploy.sh <tag>
 #   Local test:   docker compose up --build api        then  http://127.0.0.1:8000/docs
 name: truecost
 
 services:
   api:
-    build: .
-    image: truecost-api:latest
+    build: .                             # local: docker compose up --build api
+    image: ${IMAGE:-ghcr.io/sanjurevanthar/truecost-api}:${IMAGE_TAG:-latest}   # server: pulled from the registry (deploy.sh sets IMAGE_TAG)
     restart: unless-stopped
     env_file: .env                       # GEMINI_API_KEY, API_ACCESS_TOKEN, CORS_ORIGINS, ...
     environment:
@@ -17,12 +17,18 @@ services:
       LOG_FORMAT: json                   # one JSON object per line
       LOG_LEVEL: ${LOG_LEVEL:-INFO}      # set DEBUG in .env while debugging, then back to INFO
       TRUECOST_NO_DOTENV: "1"            # config comes from env_file, not a file inside the image
+      # --- abuse protection (override any of these in .env) ---
+      AI_RATE_LIMIT_PER_MIN: ${AI_RATE_LIMIT_PER_MIN:-10}           # AI calls per client (and per session) per minute; 429 when exceeded
+      SESSION_RATE_LIMIT_PER_MIN: ${SESSION_RATE_LIMIT_PER_MIN:-20} # new sessions per client per minute
+      DAILY_TOKEN_BUDGET: ${DAILY_TOKEN_BUDGET:-200000}             # LLM tokens per UTC day (~200 note reads); 0 = unlimited
+      REQUIRE_SESSION: ${REQUIRE_SESSION:-false}   # true = AI endpoints need a session token; turn on once Lovable sends it
+      DOCS_ENABLED: ${DOCS_ENABLED:-true}          # set false in .env for the final deployment
     volumes:
       - ./truecost.db:/app/truecost.db:ro   # the price database is NOT in git: copy it to the server (see README)
     ports:
       - "127.0.0.1:8000:8000"            # local/SSH access only; the public door is Caddy below
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -159,7 +159,7 @@ def test_rate_limit_and_auth_failures_are_logged(stream):
     from app.config import Settings
     TestClient(create_app(container=c2, settings=Settings(None, ("*",), log_format="json"))).post(
         "/api/v1/extract", json={"note": "abc"})
-    assert find(stream, "bad or missing X-API-Key")
+    assert find(stream, "auth missing")
 
 
 def test_unhandled_exception_returns_500_with_request_id_and_logs_traceback(stream):

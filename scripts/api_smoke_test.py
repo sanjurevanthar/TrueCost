@@ -29,13 +29,15 @@ except ImportError:
 PAYERS = ["Independent Health", "Highmark BCBS", "Univera"]
 RESULTS = []
 API_KEY = None  # set from --api-key / API_ACCESS_TOKEN
+SESSION = None  # Bearer token, minted from POST /api/v1/session when the server offers it
 
 
 def call(base, method, path, body=None, headers=None, timeout=30):
     """Return (status, parsed_json_or_None, response_headers, seconds)."""
     data = json.dumps(body).encode() if body is not None else None
     h = {"Content-Type": "application/json", "Accept": "application/json", "ngrok-skip-browser-warning": "1",
-         **({"X-API-Key": API_KEY} if API_KEY else {}), **(headers or {})}
+         **({"X-API-Key": API_KEY} if API_KEY else {}),
+         **({"Authorization": f"Bearer {SESSION}"} if SESSION else {}), **(headers or {})}
     req = urllib.request.Request(base.rstrip("/") + path, data=data, method=method, headers=h)
     t0 = time.time()
     try:
@@ -73,12 +75,33 @@ def insured(payer="Independent Health", **kw):
 def run(base, origin):
     state = {}
 
+    def t_session():
+        global SESSION
+        s, j, _, _ = call(base, "POST", "/api/v1/session")
+        if s == 404:
+            return                      # older server without sessions
+        expect(s == 200 and j["token_type"] == "Bearer" and j["expires_in"] > 0, f"{s} {j}")
+        SESSION = j["token"]
+
+    def t_auth_enforced_or_open():
+        bad = call(base, "POST", "/api/v1/extract", {"note": "bilateral diagnostic mammogram"},
+                   headers={"Authorization": "Bearer not.a.token"})[0]
+        expect(bad == 401, f"a forged token must give 401, got {bad}")
+
+    def t_security_headers():
+        _, _, h, _ = call(base, "GET", "/api/v1/hospitals")
+        expect(h.get("x-content-type-options") == "nosniff" and h.get("x-frame-options") == "DENY",
+               "security headers missing")
+        expect(h.get("x-request-id"), "X-Request-ID missing")
+
     def t_health():
         s, j, _, _ = call(base, "GET", "/health")
         expect(s == 200 and j == {"status": "ok"}, f"got {s} {j}")
 
     def t_openapi():
         s, j, _, _ = call(base, "GET", "/openapi.json")
+        if s == 404:
+            return                      # DOCS_ENABLED=false (production): hidden on purpose
         expect(s == 200, f"status {s}")
         paths = set(j["paths"])
         need = {"/api/v1/codes", "/api/v1/hospitals", "/api/v1/plans", "/api/v1/extract", "/api/v1/estimate"}
@@ -195,7 +218,8 @@ def run(base, origin):
 
     print(f"\nTrueCost API smoke test -> {base}\n")
     for name, fn in [
-        ("GET /health", t_health), ("OpenAPI lists all endpoints", t_openapi),
+        ("POST /session mints a token", t_session), ("forged token is rejected", t_auth_enforced_or_open),
+        ("security headers + request id", t_security_headers), ("GET /health", t_health), ("OpenAPI lists all endpoints", t_openapi),
         ("GET /hospitals has coordinates", t_hospitals), ("GET /codes?phase filter", t_codes),
         ("GET /plans for each insurer", t_plans), ("GET /plans rejects unknown insurer", t_plans_bad_payer),
         ("POST /extract finds codes", t_extract), ("POST /extract validates input", t_extract_validation),

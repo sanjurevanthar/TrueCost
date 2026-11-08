@@ -42,7 +42,7 @@ def estimate(api, codes=DIAGNOSTIC, mode="insured", **kw):
 
 # ---------------------------------------------------------------- reference data
 def test_health(api):
-    assert api.get("/health").json() == {"status": "ok"}
+    assert api.get("/health").json()["status"] == "ok"
 
 
 def test_all_seven_hospitals_with_coordinates(api):
@@ -195,3 +195,25 @@ def test_suspicious_surgery_rates_carry_a_warning(api):
     r = estimate(api, codes=["19301"], insurance=ins("Independent Health"))
     kaleida = next(h for h in r["hospitals"] if h["hospital"] == "Buffalo General Medical Center")
     assert kaleida["lines"][0]["status"] == "priced" and kaleida["lines"][0]["warning"]
+
+
+# ---------------------------------------------------------------- the "all $797" screenshot scenario
+def test_when_the_cap_decides_the_cost_hospitals_tie_but_prices_still_differ(api):
+    r = estimate(api, codes=["77065", "19083"],
+                 insurance=ins("Independent Health", ded=797, pct=0, oop=5000, plan="PPO"))
+    ranked = [h for h in r["hospitals"] if h["rank"]]
+    assert len(ranked) >= 3 and {h["total_patient_pays"] for h in ranked} == {797.0}
+    assert all(h["rank"] == 1 and h["tied"] for h in ranked) and r["max_savings"] == 0
+    assert len(r["best_hospitals"]) == len(ranked) and "same ($797)" in r["notice"]
+    allowed = {h["hospital"]: h["total_allowed"] for h in ranked}
+    assert allowed["Roswell Park"] > allowed["Buffalo General Medical Center"]     # the data itself is NOT identical
+    assert allowed["Buffalo General Medical Center"] == allowed["Millard Fillmore Suburban Hospital"]   # one Kaleida list
+
+
+def test_without_the_cap_the_same_codes_rank_normally(api):
+    r = estimate(api, codes=["77065", "19083"], insurance=ins("Independent Health", ded=500, pct=20, oop=3000, plan="PPO"))
+    ranked = [h for h in r["hospitals"] if h["rank"]]
+    # Buffalo General and Millard Fillmore share Kaleida's single price list, so they honestly tie for first
+    assert {h["hospital"] for h in ranked[:2]} == {"Buffalo General Medical Center", "Millard Fillmore Suburban Hospital"}
+    assert [h["rank"] for h in ranked] == [1, 1, 3] and ranked[-1]["hospital"] == "Roswell Park"
+    assert "identical prices" in r["notice"]
