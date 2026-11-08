@@ -112,7 +112,7 @@ def read_bytes(path):
     return b"".join(safe_lines(path))
 
 # ------------------------------------------------------------------ payer mapping
-EXCLUDE = re.compile(r"MEDICARE|MEDICAID|\bMCD\b|\bMCR\b|ESSENTIAL|SENIOR|CHILD HEALTH|MEDISOURCE|ENCOMPASS 65|PASSPORT ADV", re.I)
+EXCLUDE = re.compile(r"MEDICARE|MEDICAID|\bMCD\b|\bMCR\b|ESSENTIAL|SENIOR|CHILD HEALTH|MEDISOURCE|ENCOMPASS 65|PASSPORT ADV|OUT OF AREA|\bMICH(IGAN)?\b", re.I)
 
 
 def map_payer(payer, plan):

@@ -24,7 +24,9 @@ def create_app(container: Optional[Container] = None, settings: Optional[Setting
 
     @app.exception_handler(DomainError)
     async def domain_error_handler(_: Request, exc: DomainError):
-        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+        retry = getattr(exc, "retry_after", None)
+        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)},
+                            headers={"Retry-After": str(retry)} if retry else None)
 
     @app.get("/health", tags=["meta"])
     def health():

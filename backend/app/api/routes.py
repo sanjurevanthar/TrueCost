@@ -9,6 +9,7 @@ from ..container import Container
 from ..domain.models import Payer
 from ..exceptions import (EmptyUploadError, ImageTooLargeError, TranscriptionUnavailableError,
                           UnsupportedImageError)
+from ..security import check_token, client_key
 from ..services.extraction import ExtractionResult
 from ..services.transcription import ALLOWED_TYPES, MAX_BYTES
 from ..schemas import (CodeOut, EstimateRequest, EstimateResponse, ExtractedCodeOut, ExtractRequest,
@@ -24,6 +25,12 @@ def _usage_out(u):
 
 def get_container(request: Request) -> Container:
     return request.app.state.container
+
+
+def guard_ai(request: Request, c: Container = Depends(get_container)):
+    """Access token (if configured) + per-client rate limit for endpoints that spend LLM tokens."""
+    check_token(request, c.access_token)
+    c.limiter.check(client_key(request))
 
 
 @router.get("/codes", response_model=List[CodeOut], tags=["reference"])
@@ -43,7 +50,7 @@ def list_plans(payer: Payer, c: Container = Depends(get_container)):
     return c.repo.list_plans(payer.value)
 
 
-@router.post("/extract", response_model=ExtractResponse, tags=["ai"])
+@router.post("/extract", response_model=ExtractResponse, tags=["ai"], dependencies=[Depends(guard_ai)])
 def extract_codes(body: ExtractRequest, c: Container = Depends(get_container)):
     """Suggest billing codes from a doctor's note. The patient must confirm them."""
     res = c.extractor.extract_with_usage(body.note)
@@ -58,7 +65,7 @@ def estimate(body: EstimateRequest, c: Container = Depends(get_container)):
     return c.estimator.estimate(body)
 
 
-@router.post("/extract/image", response_model=ExtractImageResponse, tags=["ai"])
+@router.post("/extract/image", response_model=ExtractImageResponse, tags=["ai"], dependencies=[Depends(guard_ai)])
 async def extract_codes_from_image(file: UploadFile = File(..., description="Photo, scan or PDF of the doctor's note (png, jpeg, webp, pdf; max 10 MB)"),
                                    c: Container = Depends(get_container)):
     """Read a doctor's note from an image/PDF, then suggest billing codes like /extract."""

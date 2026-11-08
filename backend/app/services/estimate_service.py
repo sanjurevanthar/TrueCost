@@ -27,6 +27,14 @@ DISCLAIMERS = [
 ]
 
 
+HIGH_VS_CHARGE = Decimal("2")     # negotiated rate more than 2x the hospital's own listed charge
+LOW_CASH_VS_CHARGE = Decimal("0.25")  # cash price under 25% of the listed charge
+
+
+def _gross_of(recs: List[PriceRecord]) -> Optional[Decimal]:
+    return next((r.gross_charge for r in recs if r.gross_charge), None)
+
+
 @dataclass
 class _PricedLine:
     """A code the hospital could price: the amount the plan allows, and how we got it."""
@@ -34,6 +42,7 @@ class _PricedLine:
     allowed: Decimal
     basis: str  # negotiated | cash | gross
     selected: Optional[SelectedRate] = None
+    warning: Optional[str] = None
 
 
 class EstimateService:
@@ -125,7 +134,7 @@ class EstimateService:
                     plan_used=sel.record.plan if sel else None, plan_matched=sel.plan_matched if sel else None,
                     deductible_paid=float(c.deductible_paid), coinsurance_paid=float(c.coinsurance_paid),
                     patient_pays=float(c.patient_pays), insurer_pays=float(c.insurer_pays),
-                    hit_oop_max=c.hit_oop_max))
+                    hit_oop_max=c.hit_oop_max, warning=p.warning))
             else:
                 lines.append(LineEstimate(code=code, description=desc, status="unavailable",
                                           reason=unavailable[code]))
@@ -151,7 +160,12 @@ class EstimateService:
         payer_recs = [r for r in recs if r.payer == profile.payer.value]
         selected = self._selector.select(payer_recs, profile.plan)
         if selected:
-            return _PricedLine(code.code, selected.rate, "negotiated", selected), ""
+            gross = _gross_of(recs)
+            warn = None
+            if gross and selected.rate > HIGH_VS_CHARGE * gross:
+                warn = ("This rate is much higher than the hospital's own listed charge, so it may be a bundled or "
+                        "case rate. Please confirm the price with the hospital.")
+            return _PricedLine(code.code, selected.rate, "negotiated", selected, warn), ""
         if payer_recs:
             return None, f"{profile.payer.value} rate is formula-based (percent of charges), not a dollar amount."
         if recs:
@@ -162,7 +176,12 @@ class EstimateService:
     def _price_self_pay(code: MedicalCode, recs: List[PriceRecord]) -> Tuple[Optional[_PricedLine], str]:
         cash = next((r.cash_price for r in recs if r.cash_price is not None), None)
         if cash is not None:
-            return _PricedLine(code.code, money(cash), "cash"), ""
+            gross = _gross_of(recs)
+            warn = None
+            if gross and cash < LOW_CASH_VS_CHARGE * gross:
+                warn = ("This self-pay price is far below the hospital's listed charge. Please confirm it with the "
+                        "hospital before relying on it.")
+            return _PricedLine(code.code, money(cash), "cash", None, warn), ""
         gross = next((r.gross_charge for r in recs if r.gross_charge is not None), None)
         if gross is not None:
             return _PricedLine(code.code, money(gross), "gross"), ""

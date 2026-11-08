@@ -9,6 +9,7 @@ from .domain.geo import GeoService
 from .domain.rate_selector import PlanAwareMedianSelector
 from .repositories.base import PriceRepository
 from .repositories.sqlite_repo import SqlitePriceRepository
+from .security import RateLimiter
 from .usage import UsageTracker
 from .services.estimate_service import EstimateService
 from .services.extraction import CodeExtractor, KeywordCodeExtractor
@@ -37,12 +38,17 @@ class Container:
     extractor: CodeExtractor
     transcriber: NoteTranscriber | None = None  # None = image upload disabled (no Gemini key)
     usage: UsageTracker = field(default_factory=UsageTracker)
+    limiter: RateLimiter = field(default_factory=lambda: RateLimiter(0))  # 0 = off (tests); build() turns it on
+    access_token: str | None = None
 
     @classmethod
     def build(cls, settings: Settings) -> "Container":
         repo = SqlitePriceRepository(settings.db_path)
         transcriber = GeminiNoteTranscriber(model=settings.gemini_model) if os.getenv("GEMINI_API_KEY") else None
-        return cls.from_repo(repo, extractor=build_extractor(repo, settings), transcriber=transcriber)
+        c = cls.from_repo(repo, extractor=build_extractor(repo, settings), transcriber=transcriber)
+        c.limiter = RateLimiter(settings.ai_rate_limit_per_min)
+        c.access_token = settings.api_access_token
+        return c
 
     @classmethod
     def from_repo(cls, repo: PriceRepository, extractor: CodeExtractor | None = None,

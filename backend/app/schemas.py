@@ -55,6 +55,7 @@ class LineEstimate(BaseModel):
     insurer_pays: Optional[float] = None
     hit_oop_max: Optional[bool] = None
     reason: Optional[str] = Field(None, description="Why a price is unavailable")
+    warning: Optional[str] = Field(None, description="Set when the price looks unreliable - show it next to the number")
 
 
 class HospitalEstimate(BaseModel):

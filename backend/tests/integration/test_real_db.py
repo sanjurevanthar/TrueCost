@@ -182,3 +182,16 @@ def test_unknown_code_404(api):
 
 def test_insured_without_insurance_422(api):
     assert api.post("/api/v1/estimate", json={"codes": ["77066"], "mode": "insured"}).status_code == 422
+
+
+# ---------------------------------------------------------------- data hygiene
+def test_no_out_of_area_plans_in_dropdowns(api):
+    for payer in INSURERS:
+        plans = api.get("/api/v1/plans", params={"payer": payer}).json()
+        assert not [p for p in plans if "out of area" in p.lower() or "mich" in p.lower()], plans
+
+
+def test_suspicious_surgery_rates_carry_a_warning(api):
+    r = estimate(api, codes=["19301"], insurance=ins("Independent Health"))
+    kaleida = next(h for h in r["hospitals"] if h["hospital"] == "Buffalo General Medical Center")
+    assert kaleida["lines"][0]["status"] == "priced" and kaleida["lines"][0]["warning"]

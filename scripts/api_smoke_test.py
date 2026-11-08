@@ -12,6 +12,7 @@ Checks the API contract the frontend relies on: response shapes, required fields
 """
 import argparse
 import json
+import os
 import ssl
 import sys
 import time
@@ -27,13 +28,14 @@ except ImportError:
 
 PAYERS = ["Independent Health", "Highmark BCBS", "Univera"]
 RESULTS = []
+API_KEY = None  # set from --api-key / API_ACCESS_TOKEN
 
 
 def call(base, method, path, body=None, headers=None, timeout=30):
     """Return (status, parsed_json_or_None, response_headers, seconds)."""
     data = json.dumps(body).encode() if body is not None else None
     h = {"Content-Type": "application/json", "Accept": "application/json", "ngrok-skip-browser-warning": "1",
-         **(headers or {})}
+         **({"X-API-Key": API_KEY} if API_KEY else {}), **(headers or {})}
     req = urllib.request.Request(base.rstrip("/") + path, data=data, method=method, headers=h)
     t0 = time.time()
     try:
@@ -210,7 +212,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--cors-origin", default="https://example.lovable.app")
+    ap.add_argument("--api-key", default=os.getenv("API_ACCESS_TOKEN"), help="X-API-Key if the server sets API_ACCESS_TOKEN")
     a = ap.parse_args()
+    global API_KEY
+    API_KEY = a.api_key
     try:
         call(a.base_url, "GET", "/health", timeout=10)
     except Exception as e:  # noqa: BLE001
