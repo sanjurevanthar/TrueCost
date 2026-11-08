@@ -1,6 +1,7 @@
 """Composition root: the one place that decides which concrete classes are wired together."""
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 
@@ -16,12 +17,16 @@ from .services.extraction import CodeExtractor, KeywordCodeExtractor
 from .services.transcription import GeminiNoteTranscriber, NoteTranscriber
 
 
+log = logging.getLogger(__name__)
+
+
 def build_extractor(repo: PriceRepository, settings: Settings) -> CodeExtractor:
     """EXTRACTOR=keyword|claude|gemini|auto. auto = Gemini if GEMINI_API_KEY, else Claude if ANTHROPIC_API_KEY,
     else the keyword matcher. LLM extractors fall back to the keyword matcher on any failure."""
     mode = settings.extractor
     if mode == "auto":
         mode = "gemini" if os.getenv("GEMINI_API_KEY") else "claude" if os.getenv("ANTHROPIC_API_KEY") else "keyword"
+    log.info("extractor selected", extra={"requested": settings.extractor, "using": mode})
     if mode == "gemini":
         from .services.gemini_extractor import GeminiCodeExtractor
         return GeminiCodeExtractor(repo, model=settings.gemini_model)

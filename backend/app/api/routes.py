@@ -1,6 +1,7 @@
 """Thin HTTP layer: validate input, call a service, shape the output. No business logic here."""
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
@@ -16,6 +17,7 @@ from ..schemas import (CodeOut, EstimateRequest, EstimateResponse, ExtractedCode
                        ExtractImageResponse, ExtractResponse, HospitalOut, TokenUsageOut)
 
 router = APIRouter(prefix="/api/v1")
+log = logging.getLogger(__name__)
 
 
 def _usage_out(u):
@@ -55,6 +57,9 @@ def extract_codes(body: ExtractRequest, c: Container = Depends(get_container)):
     """Suggest billing codes from a doctor's note. The patient must confirm them."""
     res = c.extractor.extract_with_usage(body.note)
     c.usage.record("extract", res.usage, res.fallback_used)
+    log.info("extract", extra={"extractor": c.extractor.name, "note_chars": len(body.note),
+                              "codes": [x.code for x in res.codes], "fallback_used": res.fallback_used,
+                              "tokens": res.usage.total_tokens if res.usage else 0})
     return ExtractResponse(extractor=c.extractor.name, codes=[ExtractedCodeOut(**vars(x)) for x in res.codes],
                            fallback_used=res.fallback_used, usage=_usage_out(res.usage))
 
@@ -78,11 +83,14 @@ async def extract_codes_from_image(file: UploadFile = File(..., description="Pho
         raise ImageTooLargeError(MAX_BYTES // (1024 * 1024))
     if not data:
         raise EmptyUploadError()
+    log.info("image upload", extra={"content_type": file.content_type, "bytes": len(data), "reader": c.transcriber.name})
     transcript, read_usage = c.transcriber.transcribe(data, file.content_type)
     c.usage.record("read_image", read_usage)
     res = c.extractor.extract_with_usage(transcript) if len(transcript) >= 3 else ExtractionResult([])
     c.usage.record("extract", res.usage, res.fallback_used)
     total = (read_usage + res.usage) if read_usage and res.usage else (read_usage or res.usage)
+    log.info("extract from image", extra={"transcript_chars": len(transcript), "codes": [x.code for x in res.codes],
+                                         "fallback_used": res.fallback_used, "tokens": total.total_tokens if total else 0})
     return ExtractImageResponse(extractor=c.extractor.name, reader=c.transcriber.name, transcript=transcript,
                                 codes=[ExtractedCodeOut(**vars(x)) for x in res.codes],
                                 fallback_used=res.fallback_used, usage=_usage_out(total))

@@ -1,0 +1,9 @@
+# HTTPS reverse proxy. Caddy gets and renews a free Let's Encrypt certificate for $DOMAIN automatically.
+# Needs: an A record pointing $DOMAIN at this server, and ports 80 + 443 open.
+{$DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 12MB      # image uploads are capped at 10 MB by the API
+	}
+	reverse_proxy api:8000
+}

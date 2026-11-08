@@ -1,0 +1,68 @@
+# TrueCost on a Vultr VM.
+#   First time:   create .env (variables listed in README -> Deploy on Vultr), then   docker compose up -d --build
+#   Logs:         docker compose logs -f api          (JSON lines; grep a request:  ... | grep <request_id>)
+#   Status:       docker compose ps                    (api shows "healthy" once /health answers)
+#   Update:       git pull && docker compose up -d --build
+#   Local test:   docker compose up --build api        then  http://127.0.0.1:8000/docs
+name: truecost
+
+services:
+  api:
+    build: .
+    image: truecost-api:latest
+    restart: unless-stopped
+    env_file: .env                       # GEMINI_API_KEY, API_ACCESS_TOKEN, CORS_ORIGINS, ...
+    environment:
+      DB_PATH: /app/truecost.db
+      LOG_FORMAT: json                   # one JSON object per line
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}      # set DEBUG in .env while debugging, then back to INFO
+      TRUECOST_NO_DOTENV: "1"            # config comes from env_file, not a file inside the image
+    volumes:
+      - ./truecost.db:/app/truecost.db:ro   # the price database is NOT in git: copy it to the server (see README)
+    ports:
+      - "127.0.0.1:8000:8000"            # local/SSH access only; the public door is Caddy below
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:                             # rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    read_only: true                      # the app writes nothing to disk
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env, e.g. api.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                 # keeps the TLS certificate across restarts
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

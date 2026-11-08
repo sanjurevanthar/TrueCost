@@ -16,6 +16,8 @@ class Settings:
     extractor: str = "auto"  # auto | gemini | claude | keyword
     gemini_model: str = "gemini-3.5-flash"
     claude_model: str = "claude-opus-5-5"
+    log_level: str = "INFO"
+    log_format: str = "text"   # text | json
     ai_rate_limit_per_min: int = 10   # per client on AI endpoints; 0 disables
     api_access_token: str | None = None  # if set, AI endpoints need header X-API-Key
 
@@ -29,6 +31,8 @@ class Settings:
             extractor=os.getenv("EXTRACTOR", "auto").lower(),
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
             claude_model=os.getenv("CLAUDE_MODEL", "claude-opus-5-5"),
+            log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+            log_format=os.getenv("LOG_FORMAT", "text").lower(),
             ai_rate_limit_per_min=int(os.getenv("AI_RATE_LIMIT_PER_MIN", "10")),
             api_access_token=os.getenv("API_ACCESS_TOKEN") or None,
         )

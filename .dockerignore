@@ -1,0 +1,16 @@
+.git
+.venv
+data
+notebooks
+samples
+scripts
+.claude
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/.pytest_cache
+backend/tests
+truecost.db
+*.md
+!README.md
