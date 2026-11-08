@@ -29,8 +29,8 @@ class PlanAwareMedianSelector(RateSelector):
             return None
 
         pool, matched = priced, False
-        if plan_hint:
-            hint = plan_hint.strip().lower()
+        hint = (plan_hint or "").strip().lower()
+        if hint:
             hits = [c for c in priced if c.plan and hint in c.plan.lower()]
             if hits:
                 pool, matched = hits, True

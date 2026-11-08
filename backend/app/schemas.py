@@ -55,6 +55,7 @@ class LineEstimate(BaseModel):
     insurer_pays: Optional[float] = None
     hit_oop_max: Optional[bool] = None
     reason: Optional[str] = Field(None, description="Why a price is unavailable")
+    warning: Optional[str] = Field(None, description="Set when the price looks unreliable - show it next to the number")
 
 
 class HospitalEstimate(BaseModel):
@@ -108,6 +109,19 @@ class ExtractedCodeOut(BaseModel):
     confidence: float
 
 
+class TokenUsageOut(BaseModel):
+    input_tokens: int
+    output_tokens: int = Field(..., description="Includes the model's thinking tokens")
+    total_tokens: int
+
+
 class ExtractResponse(BaseModel):
     extractor: str
     codes: List[ExtractedCodeOut]
+    fallback_used: bool = Field(False, description="True if the AI call failed and the keyword matcher answered")
+    usage: Optional[TokenUsageOut] = Field(None, description="Tokens used by this request; null if no AI call was made")
+
+
+class ExtractImageResponse(ExtractResponse):
+    transcript: str = Field(..., description="Text read from the image - show it so the patient can check it")
+    reader: str

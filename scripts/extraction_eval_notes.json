@@ -1,0 +1,12 @@
+[
+ {"id": "n1", "note": "62F with abnormal screening mammogram. Plan: bilateral diagnostic mammogram, targeted breast ultrasound, and ultrasound-guided core needle biopsy of the left breast. Tissue to pathology.", "expected": ["77066", "76642", "19083", "88305"]},
+ {"id": "n2", "note": "Biopsy confirms invasive ductal carcinoma, left breast. Discussed options. Patient elects lumpectomy with sentinel lymph node biopsy, followed by whole-breast radiation therapy.", "expected": ["19301", "38525", "77385"]},
+ {"id": "n3", "note": "45F, BRCA1 carrier, dense breasts. Order bilateral breast MRI with and without contrast now. Annual screening mammogram due in 3 months.", "expected": ["77049", "77067"]},
+ {"id": "n4", "note": "Suspicious calcifications on right mammogram. Referred for stereotactic-guided breast biopsy next week.", "expected": ["19081"]},
+ {"id": "n5", "note": "Stage II breast cancer. Neoadjuvant chemotherapy to begin Monday via IV infusion, 6 cycles. Surgery planning to follow.", "expected": ["96413"]},
+ {"id": "n6", "note": "Pt is 3 yrs s/p lumpectomy and radiation, doing well. No new complaints. Routine follow-up only; no imaging or procedures ordered today.", "expected": []},
+ {"id": "n7", "note": "MRI of the breast shows a lesion not seen on ultrasound. Recommend MRI-guided biopsy of the right breast, then pathology review.", "expected": ["19085", "88305"]},
+ {"id": "n8", "note": "Pt c/o sore throat and fever x3 days. Rapid strep negative. Rx amoxicillin.", "expected": []},
+ {"id": "n9", "note": "Large right breast mass, biopsy-proven malignancy. Plan: simple total mastectomy right side. Chemo will be discussed after surgery pathology returns.", "expected": ["19303"]},
+ {"id": "n10", "note": "Lump in left breast. Doing a unilateral diagnostic mammogram of the left breast and a limited ultrasound of the left breast today.", "expected": ["77065", "76642"]}
+]
