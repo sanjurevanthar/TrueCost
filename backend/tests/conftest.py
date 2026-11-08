@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal as D
 from typing import List, Optional, Sequence
 
@@ -8,6 +9,8 @@ from app.container import Container
 from app.domain.models import Hospital, MedicalCode, PriceRecord
 from app.main import create_app
 from app.repositories.base import PriceRepository
+
+os.environ.setdefault("TRUECOST_NO_DOTENV", "1")  # unit tests must not read the real .env
 
 
 def rec(hospital, code, payer=None, plan=None, rate=None, cash=None, gross=None, rate_type="negotiated_dollar",
@@ -58,3 +61,11 @@ def repo():
 @pytest.fixture
 def client(repo):
     return TestClient(create_app(container=Container.from_repo(repo)))
+
+
+@pytest.fixture(autouse=True)
+def _no_llm_keys(monkeypatch, request):
+    """Unit tests never see real LLM keys (integration tests that need them set their own)."""
+    if "integration" not in str(request.fspath):
+        for k in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "EXTRACTOR"):
+            monkeypatch.delenv(k, raising=False)

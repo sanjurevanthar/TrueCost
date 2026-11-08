@@ -18,12 +18,13 @@ scripts/build_db.py      builds truecost.db from data/ (~10 min, scans ~17 GB). 
                          because Python gets "Operation timed out" on files under ~/Desktop.
 scripts/add_kaleida.py   adds Kaleida prices to an existing truecost.db
 notebooks/               build_db.ipynb, download_kaleida.ipynb, preview_data.ipynb  (kernel: "Python (TrueCost)")
-backend/                 FastAPI app (layers: api -> services -> domain + repositories), 25 passing tests
+backend/                 FastAPI app (layers: api -> services -> domain + repositories), 113 passing tests
+pyproject.toml, uv.lock  dependencies (uv) | Makefile  shortcuts
 truecost.db              SQLite: prices, hospitals, codes
 .venv/                   rebuilt after the rename
 ```
-Run API:  `cd backend && ../.venv/bin/uvicorn app.main:create_app --factory --reload`  (docs at /docs)
-Run tests: `cd backend && ../.venv/bin/python -m pytest -q`
+Setup: `uv sync` (or `make setup`).  Run API: `make run`  (docs at /docs)
+Run tests: `make test` (113 tests; `make smoke URL=...` for a running API)
 
 ## Database (truecost.db) - current state
 - prices: hospital, code, code_type, description, setting, payer, plan, rate_type, negotiated_rate, cash_price, gross_charge, notes

@@ -56,13 +56,13 @@ IMAGING = {c for c in TARGET if c[:2] in ("76", "77") and len(c) == 5}
 CPT_TYPES = {"CPT", "HCPCS", "CPT/HCPCS"}
 
 # ------------------------------------------------------------------ hospitals
-# lat/lng are APPROXIMATE (typed from memory, ~street level) - verify before the demo.
+# lat/lng geocoded from the addresses with OpenStreetMap (scripts/update_data.py --geocode).
 HOSPITALS = {
     "Roswell Park": ("665 Elm St, Buffalo, NY 14203", 42.8977, -78.8667),
-    "ECMC": ("462 Grider St, Buffalo, NY 14215", 42.9300, -78.8157),
-    "Mercy Hospital of Buffalo": ("565 Abbott Rd, Buffalo, NY 14220", 42.8280, -78.8030),
-    "Kenmore Mercy Hospital": ("2950 Elmwood Ave, Kenmore, NY 14217", 42.9650, -78.8650),
-    "Mount St. Mary's Hospital": ("5300 Military Rd, Lewiston, NY 14092", 43.1700, -79.0350),
+    "ECMC": ("462 Grider St, Buffalo, NY 14215", 42.9276, -78.8304),
+    "Mercy Hospital of Buffalo": ("565 Abbott Rd, Buffalo, NY 14220", 42.848, -78.8132),
+    "Kenmore Mercy Hospital": ("2950 Elmwood Ave, Kenmore, NY 14217", 42.978, -78.8807),
+    "Mount St. Mary's Hospital": ("5300 Military Rd, Lewiston, NY 14092", 43.1541, -79.0325),
 }
 
 CMS_FILES = {
@@ -71,11 +71,11 @@ CMS_FILES = {
     "Mount St. Mary's Hospital": "16-1523353_Mount-St-Marys-Hospital_StandardCharges.csv",
 }
 # Kaleida publishes ONE system-wide file for all campuses -> same prices under each site name.
-# lat/lng APPROXIMATE - verify before the demo.
+# lat/lng geocoded with OpenStreetMap (scripts/update_data.py --geocode).
 KALEIDA_FILE = "161533232_kaleida-health_standardcharges.json"
 KALEIDA_SITES = {
-    "Buffalo General Medical Center": ("100 High St, Buffalo, NY 14203", 42.8985, -78.8660),
-    "Millard Fillmore Suburban Hospital": ("1540 Maple Rd, Williamsville, NY 14221", 42.9840, -78.7700),
+    "Buffalo General Medical Center": ("100 High St, Buffalo, NY 14203", 42.9009, -78.866),
+    "Millard Fillmore Suburban Hospital": ("1540 Maple Rd, Williamsville, NY 14221", 42.9935, -78.7302),
 }
 ROSWELL_FILE = "161552370_roswell-park-cancer-institute_standardcharges.json"
 ECMC_FILE = "ECMC-Charge-Master-01012026.csv"

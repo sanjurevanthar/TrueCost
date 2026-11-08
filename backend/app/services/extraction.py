@@ -23,11 +23,33 @@ class ExtractedCode:
     confidence: float
 
 
+@dataclass(frozen=True)
+class TokenUsage:
+    """Tokens billed for one LLM call (output includes the model's thinking tokens)."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        return TokenUsage(self.input_tokens + other.input_tokens, self.output_tokens + other.output_tokens,
+                          self.total_tokens + other.total_tokens)
+
+
+@dataclass(frozen=True)
+class ExtractionResult:
+    codes: List[ExtractedCode]
+    usage: Optional[TokenUsage] = None     # None = no LLM call was made
+    fallback_used: bool = False            # True = the LLM failed and the keyword matcher answered
+
+
 class CodeExtractor(ABC):
     name = "base"
 
     @abstractmethod
     def extract(self, note: str) -> List[ExtractedCode]: ...
+
+    def extract_with_usage(self, note: str) -> ExtractionResult:
+        return ExtractionResult(self.extract(note))
 
 
 class KeywordCodeExtractor(CodeExtractor):

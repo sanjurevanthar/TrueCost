@@ -1,0 +1,30 @@
+[project]
+name = "truecost"
+version = "0.1.0"
+description = "Know before you owe: ranks Western NY hospitals by a breast cancer patient's estimated out-of-pocket cost."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [ # what the API needs to run
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2",
+    "anthropic>=2.6.0",
+    "google-genai>=2.33.0",
+    "python-dotenv>=1.2.4",
+    "python-multipart>=0.0.32",
+]
+
+[dependency-groups]
+dev = ["pytest", "httpx"]                      # tests
+data = ["pandas", "certifi", "requests"]       # scripts/ (build_db, update_data)
+notebooks = ["ipykernel", "jupyter"]           # notebooks/
+
+[tool.uv]
+package = false                                # an app, not a library: nothing to build/install
+default-groups = ["dev", "data", "notebooks"]  # plain `uv sync` installs everything
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]                       # lets tests do `from app...` / `from tests...`
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
