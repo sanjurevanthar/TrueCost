@@ -11,6 +11,7 @@ from .domain.rate_selector import PlanAwareMedianSelector
 from .repositories.base import PriceRepository
 from .repositories.sqlite_repo import SqlitePriceRepository
 from .security import RateLimiter
+from .sessions import SessionManager
 from .usage import UsageTracker
 from .services.estimate_service import EstimateService
 from .services.extraction import CodeExtractor, KeywordCodeExtractor
@@ -45,6 +46,14 @@ class Container:
     usage: UsageTracker = field(default_factory=UsageTracker)
     limiter: RateLimiter = field(default_factory=lambda: RateLimiter(0))  # 0 = off (tests); build() turns it on
     access_token: str | None = None
+    sessions: SessionManager = field(default_factory=SessionManager)
+    session_limiter: RateLimiter = field(default_factory=lambda: RateLimiter(0))  # throttles minting new sessions
+    require_session: bool = False
+    daily_token_budget: int = 0          # 0 = unlimited
+    fallback_extractor: CodeExtractor | None = None  # used when the daily budget is spent
+
+    def budget_exceeded(self) -> bool:
+        return self.daily_token_budget > 0 and self.usage.tokens_today() >= self.daily_token_budget
 
     @classmethod
     def build(cls, settings: Settings) -> "Container":
@@ -53,6 +62,12 @@ class Container:
         c = cls.from_repo(repo, extractor=build_extractor(repo, settings), transcriber=transcriber)
         c.limiter = RateLimiter(settings.ai_rate_limit_per_min)
         c.access_token = settings.api_access_token
+        c.require_session = settings.require_session
+        c.sessions = SessionManager(settings.session_secret, settings.session_ttl_min * 60)
+        c.session_limiter = RateLimiter(settings.session_rate_limit_per_min)
+        c.daily_token_budget = settings.daily_token_budget
+        if c.sessions.ephemeral_secret and settings.require_session:
+            log.warning("SESSION_SECRET is not set: sessions reset on every restart. Set it in .env.")
         return c
 
     @classmethod
@@ -63,4 +78,5 @@ class Container:
             estimator=EstimateService(repo, PlanAwareMedianSelector(), GeoService()),
             extractor=extractor or KeywordCodeExtractor(repo),  # swap in the LLM extractor here
             transcriber=transcriber,
+            fallback_extractor=KeywordCodeExtractor(repo),
         )

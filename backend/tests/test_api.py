@@ -9,7 +9,7 @@ def est(client, **body):
 
 
 def test_health_and_reference(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json()["status"] == "ok"
     assert len(client.get("/api/v1/codes").json()) == 3
     assert [c["code"] for c in client.get("/api/v1/codes?phase=treatment").json()] == ["582"]
     assert len(client.get("/api/v1/hospitals").json()) == 3

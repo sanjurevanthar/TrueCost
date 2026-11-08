@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -72,7 +72,8 @@ class EstimateService:
         self._rank(hospitals)
 
         complete = [h for h in hospitals if h.complete]
-        best = min(complete, key=lambda h: h.total_patient_pays) if complete else None
+        best = min(complete, key=lambda h: (h.rank or 0)) if complete else None
+        best_group = [h for h in complete if h.rank == 1]
         warned = sum(1 for h in hospitals for ln in h.lines if ln.warning)
         log.info("estimate", extra={
             "mode": req.mode.value, "payer": profile.payer.value if profile else None, "codes": req.codes,
@@ -86,6 +87,8 @@ class EstimateService:
             codes=req.codes,
             hospitals=hospitals,
             best_hospital=best.hospital if best else None,
+            best_hospitals=[h.hospital for h in best_group],
+            notice=self._tie_notice(best_group, req.mode),
             max_savings=max((h.savings_vs_most_expensive or 0 for h in complete), default=None),
             disclaimers=DISCLAIMERS,
         )
@@ -204,13 +207,33 @@ class EstimateService:
 
     # ------------------------------------------------------------------ ranking
     @staticmethod
+    def _tie_notice(best_group: List[HospitalEstimate], mode: CoverageMode) -> Optional[str]:
+        """Say WHY hospitals tie: identical prices (e.g. one health system's shared price list), or the patient's
+        deductible / out-of-pocket maximum deciding the cost."""
+        if len(best_group) < 2:
+            return None
+        n, cost = len(best_group), f"${best_group[0].total_patient_pays:,.0f}"
+        if len({round(h.total_allowed, 2) for h in best_group}) == 1:
+            return f"{n} hospitals list identical prices for these services, so each would cost you {cost}."
+        return (f"You'd pay the same ({cost}) at {n} hospitals. With your deductible and out-of-pocket maximum, "
+                f"the price differences don't change what you pay - they change what your insurer pays.")
+
+    @staticmethod
     def _rank(hospitals: List[HospitalEstimate]) -> None:
+        # Rank by what the PATIENT pays. Equal cost = equal rank (1, 1, 3). total_allowed only orders the display.
         complete = sorted((h for h in hospitals if h.complete),
-                          key=lambda h: (h.total_patient_pays, h.total_allowed, h.hospital))
+                          key=lambda h: (round(h.total_patient_pays, 2), h.total_allowed, h.hospital))
         if complete:
             worst = max(h.total_patient_pays for h in complete)
+            rank, prev = 0, None
             for n, h in enumerate(complete, start=1):
-                h.rank = n
+                cost = round(h.total_patient_pays, 2)
+                if cost != prev:
+                    rank, prev = n, cost
+                h.rank = rank
                 h.savings_vs_most_expensive = round(worst - h.total_patient_pays, 2)
+            sizes = Counter(h.rank for h in complete)
+            for h in complete:
+                h.tied = sizes[h.rank] > 1
         # Final order: ranked hospitals, then partially priced ones (most coverage first).
         hospitals.sort(key=lambda h: (h.rank is None, h.rank or 0, -int(h.coverage.split("/")[0]), h.hospital))

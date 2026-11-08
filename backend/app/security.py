@@ -11,6 +11,7 @@ from typing import Deque, Dict, Optional
 from fastapi import Request
 
 from .exceptions import DomainError
+from .sessions import InvalidSession, SessionManager
 
 
 log = logging.getLogger(__name__)
@@ -19,8 +20,15 @@ log = logging.getLogger(__name__)
 class UnauthorizedError(DomainError):
     status_code = 401
 
-    def __init__(self):
-        super().__init__("Missing or invalid X-API-Key.")
+    def __init__(self, detail: str = "Missing or invalid X-API-Key."):
+        super().__init__(detail)
+
+
+class ForbiddenError(DomainError):
+    status_code = 403
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
 
 
 class RateLimitedError(DomainError):
@@ -40,7 +48,7 @@ class RateLimiter:
         self._all: Deque[float] = deque()
         self._lock = threading.Lock()
 
-    def check(self, key: str, now: Optional[float] = None) -> None:
+    def check(self, key: str, now: Optional[float] = None, count_global: bool = True) -> None:
         if self.limit <= 0:
             return
         now = time.monotonic() if now is None else now
@@ -52,11 +60,12 @@ class RateLimiter:
             if len(mine) >= self.limit:
                 log.warning("rate limit hit", extra={"client": key, "limit": self.limit, "scope": "client"})
                 raise RateLimitedError(max(1, int(mine[0] + self.window - now) + 1))
-            if len(self._all) >= self.limit * 4:
+            if count_global and len(self._all) >= self.limit * 4:
                 log.warning("rate limit hit", extra={"client": key, "limit": self.limit * 4, "scope": "global"})
                 raise RateLimitedError(max(1, int(self._all[0] + self.window - now) + 1))
             mine.append(now)
-            self._all.append(now)
+            if count_global:
+                self._all.append(now)
 
 
 def client_key(request: Request) -> str:
@@ -71,3 +80,50 @@ def check_token(request: Request, expected: Optional[str]) -> None:
     if not hmac.compare_digest(got.encode(), expected.encode()):
         log.warning("bad or missing X-API-Key", extra={"client": client_key(request), "key_sent": bool(got)})
         raise UnauthorizedError()
+
+
+def _api_key_ok(request: Request, expected: Optional[str]) -> Optional[bool]:
+    """None = no key sent, True/False = sent and right/wrong."""
+    got = request.headers.get("x-api-key")
+    if got is None:
+        return None
+    return bool(expected) and hmac.compare_digest(got.encode(), expected.encode())
+
+
+def authenticate(request: Request, sessions: SessionManager, access_token: Optional[str],
+                 require_session: bool) -> Optional[str]:
+    """Who is calling an AI endpoint? Returns an id for rate limiting ("s:<sid>" or "key"), or None for anonymous.
+
+    - `Authorization: Bearer <session>` valid -> that session. Present but bad/expired -> 401 (client should re-mint).
+    - `X-API-Key` matching API_ACCESS_TOKEN -> trusted server-to-server caller.
+    - Neither: allowed only when auth is not enforced (local development).
+    """
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        try:
+            return "s:" + sessions.verify(auth[7:].strip()).sid
+        except InvalidSession as e:
+            log.warning("session rejected", extra={"reason": e.reason, "client": client_key(request)})
+            raise UnauthorizedError("Session expired. POST /api/v1/session for a new one." if e.reason == "expired"
+                                    else "Invalid session token.") from None
+    key = _api_key_ok(request, access_token)
+    if key:
+        return "key"
+    if key is False:
+        log.warning("bad X-API-Key", extra={"client": client_key(request)})
+        raise UnauthorizedError()
+    if require_session or access_token:
+        log.warning("auth missing", extra={"client": client_key(request)})
+        raise UnauthorizedError("Session required. POST /api/v1/session first, then send "
+                                "'Authorization: Bearer <token>'.")
+    return None
+
+
+def require_admin(request: Request, access_token: Optional[str], require_session: bool) -> None:
+    """Admin-only endpoints (e.g. /usage): need the X-API-Key. A browser session is NOT enough, since anyone can mint one."""
+    if access_token:
+        if not _api_key_ok(request, access_token):
+            log.warning("admin access denied", extra={"client": client_key(request)})
+            raise UnauthorizedError()
+    elif require_session:
+        raise ForbiddenError("Admin endpoints are disabled until API_ACCESS_TOKEN is set.")

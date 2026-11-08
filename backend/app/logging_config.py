@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
-SECRET_ENV_VARS = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "API_ACCESS_TOKEN")
+SECRET_ENV_VARS = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "API_ACCESS_TOKEN", "SESSION_SECRET")
 _STD_ATTRS = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {"message", "asctime", "request_id", "taskName"}
 _HANDLER_TAG = "_truecost_handler"
 

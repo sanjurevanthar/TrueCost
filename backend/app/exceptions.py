@@ -57,3 +57,10 @@ class TranscriptionFailedError(DomainError):
 
     def __init__(self, detail="could not read the image"):
         super().__init__(f"Could not read the note from the image ({detail}). Try a clearer photo or paste the text.")
+
+
+class AIBudgetExceededError(DomainError):
+    status_code = 503
+
+    def __init__(self):
+        super().__init__("The daily AI budget has been reached, so reading images is paused. Paste the note text instead.")

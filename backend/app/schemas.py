@@ -64,7 +64,8 @@ class HospitalEstimate(BaseModel):
     lat: Optional[float]
     lng: Optional[float]
     distance_miles: Optional[float]
-    rank: Optional[int] = Field(None, description="1 = cheapest. Null if some codes could not be priced.")
+    rank: Optional[int] = Field(None, description="1 = cheapest for the patient. Hospitals costing the patient the same share a rank (1, 1, 3). Null if some codes could not be priced.")
+    tied: bool = Field(False, description="True when other hospitals cost the patient exactly the same")
     complete: bool
     coverage: str = Field(..., description="e.g. '3/4' codes priced")
     total_allowed: float
@@ -79,7 +80,9 @@ class EstimateResponse(BaseModel):
     codes: List[str]
     hospitals: List[HospitalEstimate]
     best_hospital: Optional[str]
+    best_hospitals: List[str] = Field(default_factory=list, description="Every hospital sharing the lowest patient cost (more than one = a tie)")
     max_savings: Optional[float]
+    notice: Optional[str] = Field(None, description="Plain-language note to show above the results, e.g. when hospitals tie")
     disclaimers: List[str]
 
 
@@ -120,8 +123,15 @@ class ExtractResponse(BaseModel):
     codes: List[ExtractedCodeOut]
     fallback_used: bool = Field(False, description="True if the AI call failed and the keyword matcher answered")
     usage: Optional[TokenUsageOut] = Field(None, description="Tokens used by this request; null if no AI call was made")
+    notice: Optional[str] = Field(None, description="Show to the user when set, e.g. the AI budget is spent and a basic matcher answered")
 
 
 class ExtractImageResponse(ExtractResponse):
     transcript: str = Field(..., description="Text read from the image - show it so the patient can check it")
     reader: str
+
+
+class SessionOut(BaseModel):
+    token: str
+    token_type: str = "Bearer"
+    expires_in: int = Field(..., description="Seconds until the token stops working; request a new one then")
