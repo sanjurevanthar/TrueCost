@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from abc import abstractmethod
 from typing import List, Optional, Tuple
 
@@ -88,15 +89,19 @@ class LLMCodeExtractor(CodeExtractor):
         if not note.strip() or not catalog:
             return ExtractionResult([])
         usage: Optional[TokenUsage] = None
+        t0 = time.perf_counter()
+        log.debug("llm extract start", extra={"extractor": self.name, "note_chars": len(note), "catalog": len(catalog)})
         try:
             text, usage = self._ask(note, catalog)
             items = self._parse(text)
         except Exception as e:  # noqa: BLE001 - any failure must degrade gracefully
-            log.warning("%s extraction failed (%s: %s); using keyword fallback", self.name, type(e).__name__, e)
+            log.warning("%s extraction failed (%s: %s); using keyword fallback", self.name, type(e).__name__, e,
+                        extra={"ms": round((time.perf_counter() - t0) * 1000, 1)})
             return ExtractionResult(self._fallback.extract(note), usage, fallback_used=True)
         if usage:
-            log.info("%s tokens: in=%d out=%d total=%d", self.name, usage.input_tokens, usage.output_tokens,
-                     usage.total_tokens)
+            log.info("llm call ok", extra={"extractor": self.name, "in_tokens": usage.input_tokens,
+                                         "out_tokens": usage.output_tokens, "total_tokens": usage.total_tokens,
+                                         "ms": round((time.perf_counter() - t0) * 1000, 1)})
         return ExtractionResult(self._validate(items, note, by_code), usage)
 
     def _ask(self, note: str, catalog) -> Tuple[str, Optional[TokenUsage]]:
@@ -123,9 +128,11 @@ class LLMCodeExtractor(CodeExtractor):
             except (KeyError, TypeError):
                 continue
             if code not in by_code or code in seen:
+                if code not in by_code:
+                    log.warning("dropped code: not in catalog", extra={"code": code})
                 continue
             if not evidence or _norm(evidence) not in haystack:  # evidence must really be in the note
-                log.info("dropping %s: evidence not found in note", code)
+                log.info("dropped code: evidence not found in note", extra={"code": code})
                 continue
             seen.add(code)
             c = by_code[code]

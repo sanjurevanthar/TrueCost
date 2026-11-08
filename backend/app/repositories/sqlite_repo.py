@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
+import time
 from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
@@ -8,6 +10,9 @@ from typing import List, Optional, Sequence
 
 from ..domain.models import Hospital, MedicalCode, PriceRecord
 from .base import PriceRepository
+
+
+log = logging.getLogger(__name__)
 
 
 def _dec(value) -> Optional[Decimal]:
@@ -21,10 +26,15 @@ class SqlitePriceRepository(PriceRepository):
     def __init__(self, db_path: Path):
         self._db_path = Path(db_path)
         if not self._db_path.exists():
+            log.error("database file missing", extra={"db_path": str(self._db_path)})
             raise FileNotFoundError(f"Database not found: {self._db_path}. Run scripts/build_db.py first.")
 
     def _connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        try:
+            con = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        except sqlite3.Error:
+            log.exception("cannot open database", extra={"db_path": str(self._db_path)})
+            raise
         con.row_factory = sqlite3.Row
         return con
 
@@ -48,22 +58,31 @@ class SqlitePriceRepository(PriceRepository):
     def get_codes(self, codes: Sequence[str]) -> List[MedicalCode]:
         if not codes:
             return []
+        # Safe: _marks() yields only "?" placeholders; every value is bound as a parameter.
         with closing(self._connect()) as con:
             rows = con.execute(
-                f"SELECT code, code_type, description, phase FROM codes WHERE code IN ({self._marks(codes)})",
+                f"SELECT code, code_type, description, phase FROM codes WHERE code IN ({self._marks(codes)})",  # nosec B608
                 list(codes)).fetchall()
         return [MedicalCode(r["code"], r["code_type"], r["description"], r["phase"]) for r in rows]
 
     def find_prices(self, codes: Sequence[str], payer: Optional[str] = None) -> List[PriceRecord]:
         if not codes:
             return []
-        sql = f"SELECT * FROM prices WHERE code IN ({self._marks(codes)})"
+        t0 = time.perf_counter()
+        # Safe: _marks() yields only "?" placeholders; every value is bound as a parameter.
+        sql = f"SELECT * FROM prices WHERE code IN ({self._marks(codes)})"  # nosec B608
         args: list = list(codes)
         if payer:
             sql += " AND (payer = ? OR payer IS NULL)"
             args.append(payer)
-        with closing(self._connect()) as con:
-            rows = con.execute(sql, args).fetchall()
+        try:
+            with closing(self._connect()) as con:
+                rows = con.execute(sql, args).fetchall()
+        except sqlite3.Error:
+            log.exception("price query failed", extra={"codes": list(codes), "payer": payer})
+            raise
+        log.debug("find_prices", extra={"codes": list(codes), "payer": payer, "rows": len(rows),
+                                       "ms": round((time.perf_counter() - t0) * 1000, 1)})
         return [PriceRecord(
             hospital=r["hospital"], code=r["code"], code_type=r["code_type"], description=r["description"],
             setting=r["setting"], payer=r["payer"], plan=r["plan"], rate_type=r["rate_type"],

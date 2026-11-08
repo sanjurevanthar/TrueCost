@@ -5,6 +5,8 @@ Money math is delegated to a CostCalculator chosen per request (insured vs self-
 """
 from __future__ import annotations
 
+import logging
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
@@ -17,6 +19,8 @@ from ..domain.rate_selector import RateSelector
 from ..exceptions import MissingInsuranceError, UnknownCodeError
 from ..repositories.base import PriceRepository
 from ..schemas import EstimateRequest, EstimateResponse, HospitalEstimate, LineEstimate
+
+log = logging.getLogger(__name__)
 
 DISCLAIMERS = [
     "Estimates only - not a bill or a guarantee of coverage.",
@@ -53,6 +57,7 @@ class EstimateService:
 
     # ------------------------------------------------------------------ public
     def estimate(self, req: EstimateRequest) -> EstimateResponse:
+        t0 = time.perf_counter()
         known = self._load_codes(req.codes)
         profile, payer_name = self._profile(req)
         calculator = self._calculator_for(req.mode, profile)
@@ -68,6 +73,13 @@ class EstimateService:
 
         complete = [h for h in hospitals if h.complete]
         best = min(complete, key=lambda h: h.total_patient_pays) if complete else None
+        warned = sum(1 for h in hospitals for ln in h.lines if ln.warning)
+        log.info("estimate", extra={
+            "mode": req.mode.value, "payer": profile.payer.value if profile else None, "codes": req.codes,
+            "hospitals": len(hospitals), "fully_priced": len(complete), "best": best.hospital if best else None,
+            "price_warnings": warned, "ms": round((time.perf_counter() - t0) * 1000, 1)})
+        if not complete:
+            log.warning("no hospital could price every code", extra={"codes": req.codes, "mode": req.mode.value})
         return EstimateResponse(
             mode=req.mode,
             payer=profile.payer if profile else None,
@@ -83,6 +95,7 @@ class EstimateService:
         known = {c.code: c for c in self._repo.get_codes(codes)}
         missing = [c for c in codes if c not in known]
         if missing:
+            log.warning("unknown codes requested", extra={"codes": missing})
             raise UnknownCodeError(missing)
         return known
 
@@ -118,6 +131,8 @@ class EstimateService:
             else:
                 unavailable[code] = reason
 
+        for code, why in unavailable.items():
+            log.debug("unpriced", extra={"hospital": hospital.name, "code": code, "reason": why})
         costs = calculator.calculate([p.allowed for p in priced])
         cost_by_code = {p.code: (p, c) for p, c in zip(priced, costs)}
 

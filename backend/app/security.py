@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import threading
 import time
 from collections import defaultdict, deque
@@ -10,6 +11,9 @@ from typing import Deque, Dict, Optional
 from fastapi import Request
 
 from .exceptions import DomainError
+
+
+log = logging.getLogger(__name__)
 
 
 class UnauthorizedError(DomainError):
@@ -46,8 +50,10 @@ class RateLimiter:
                     q.popleft()
             mine = self._hits[key]
             if len(mine) >= self.limit:
+                log.warning("rate limit hit", extra={"client": key, "limit": self.limit, "scope": "client"})
                 raise RateLimitedError(max(1, int(mine[0] + self.window - now) + 1))
             if len(self._all) >= self.limit * 4:
+                log.warning("rate limit hit", extra={"client": key, "limit": self.limit * 4, "scope": "global"})
                 raise RateLimitedError(max(1, int(self._all[0] + self.window - now) + 1))
             mine.append(now)
             self._all.append(now)
@@ -63,4 +69,5 @@ def check_token(request: Request, expected: Optional[str]) -> None:
         return
     got = request.headers.get("x-api-key", "")
     if not hmac.compare_digest(got.encode(), expected.encode()):
+        log.warning("bad or missing X-API-Key", extra={"client": client_key(request), "key_sent": bool(got)})
         raise UnauthorizedError()
